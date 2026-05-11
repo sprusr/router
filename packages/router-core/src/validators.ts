@@ -51,6 +51,13 @@ export interface ValidatorAdapter<TInput, TOutput> {
     output: TOutput
   }
   parse: (input: unknown) => TOutput
+  /**
+   * Optional inverse of `parse`: convert an output value back into its
+   * input/serializable representation. Used when stringifying search params
+   * to the URL so that bidirectional schemas (e.g. Zod codecs) can round-trip
+   * rich runtime types (Date, BigInt, etc.) through the URL.
+   */
+  encode?: (output: TOutput) => TInput
 }
 
 export type AnyValidatorAdapter = ValidatorAdapter<any, any>
