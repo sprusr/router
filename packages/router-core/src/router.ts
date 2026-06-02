@@ -1976,8 +1976,36 @@ export class RouterCore<
       // Replace the equal deep
       nextSearch = nullReplaceEqualDeep(fromSearch, nextSearch)
 
+      // Encode the search params for URL serialization. This is the inverse of
+      // `validateSearch`'s decode step: validators that expose an `encode`
+      // method (e.g. Zod codecs) get a chance to convert rich runtime values
+      // (Date, BigInt, etc.) back into URL-friendly representations before
+      // stringification. `nextSearch` itself stays in its decoded/output form
+      // so consumers of `location.search` keep working with the validated
+      // shape.
+      let searchToStringify: any = nextSearch
+      for (const route of destRoutes) {
+        if (!route.options.validateSearch) continue
+        try {
+          const encoded = encodeSearch(
+            route.options.validateSearch,
+            searchToStringify,
+          )
+          if (encoded != null && typeof encoded === 'object') {
+            searchToStringify =
+              searchToStringify === nextSearch
+                ? { ...searchToStringify, ...encoded }
+                : Object.assign(searchToStringify, encoded)
+          }
+        } catch {
+          // Ignore encoding errors - this happens when values don't match the
+          // schema's output shape (e.g. the user passed an already-encoded
+          // value). The raw value will be stringified as-is.
+        }
+      }
+
       // Stringify the next search
-      const searchStr = this.options.stringifySearch(nextSearch)
+      const searchStr = this.options.stringifySearch(searchToStringify)
 
       // Resolve the next hash
       const hash =
@@ -3028,6 +3056,33 @@ function validateSearch(validateSearch: AnyValidator, input: unknown): unknown {
   }
 
   return {}
+}
+
+/**
+ * Inverse of {@link validateSearch}: convert an output-shaped value back into
+ * the input/serializable shape. Detected via a duck-typed `.encode()` method on
+ * the validator, which matches both `ValidatorAdapter.encode` and schemas that
+ * expose codec-style encoding directly (e.g. Zod codecs in Zod >= 4.1).
+ *
+ * Returns `undefined` when no encoding is available so callers can fall back to
+ * the raw output value.
+ */
+function encodeSearch(
+  validateSearch: AnyValidator,
+  output: unknown,
+): unknown {
+  if (validateSearch == null) return undefined
+  if (typeof validateSearch !== 'object') return undefined
+
+  const encoder = (validateSearch as { encode?: (value: unknown) => unknown })
+    .encode
+  if (typeof encoder !== 'function') return undefined
+
+  const result = encoder(output)
+  if (result instanceof Promise) {
+    throw new SearchParamError('Async search encoding not supported')
+  }
+  return result
 }
 
 /**

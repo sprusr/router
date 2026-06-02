@@ -48,6 +48,14 @@ export const zodValidator = <
   const output = 'output' in options ? options.output : 'output'
   const _input = 'schema' in options ? options.schema._input : options._input
   const _output = 'schema' in options ? options.schema._output : options._output
+  // Zod 4 schemas (codecs in particular) expose an `encode` instance method
+  // that runs the output -> input transformation. Forward it through the
+  // adapter so the router can encode rich runtime values back into URL-safe
+  // representations when stringifying search params. Older Zod versions don't
+  // have `encode`, in which case we leave the adapter without one.
+  const schema = ('schema' in options ? options.schema : options) as unknown as {
+    encode?: (value: any) => any
+  }
   return {
     types: {
       input: input === 'output' ? _output : _input,
@@ -55,6 +63,9 @@ export const zodValidator = <
     },
     parse: (input) =>
       'schema' in options ? options.schema.parse(input) : options.parse(input),
+    ...(typeof schema.encode === 'function'
+      ? { encode: (value: any) => schema.encode!.call(schema, value) }
+      : {}),
   }
 }
 

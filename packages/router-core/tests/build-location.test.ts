@@ -406,6 +406,99 @@ describe('buildLocation - search params', () => {
 
     expect(location.search).toEqual({})
   })
+
+  test('validateSearch with `encode` should encode output -> input for searchStr while keeping `search` as the decoded form', async () => {
+    const rootRoute = new BaseRootRoute({})
+    const eventsRoute = new BaseRoute({
+      getParentRoute: () => rootRoute,
+      path: '/events',
+      validateSearch: {
+        // ValidatorAdapter-style: decode strings into Date instances, then
+        // encode them back to ISO strings for the URL.
+        types: { input: {} as { date: string }, output: {} as { date: Date } },
+        parse: (input: any) => ({ date: new Date(input.date) }),
+        encode: (output: { date: Date }) => ({
+          date: output.date.toISOString(),
+        }),
+      },
+    })
+
+    const routeTree = rootRoute.addChildren([eventsRoute])
+    const router = createTestRouter({
+      routeTree,
+      history: createMemoryHistory({ initialEntries: ['/'] }),
+    })
+    await router.load()
+
+    const date = new Date('2024-01-15T00:00:00.000Z')
+    const location = router.buildLocation({
+      to: '/events',
+      search: { date },
+    })
+
+    expect(location.search).toEqual({ date })
+    expect(location.searchStr).toBe('?date=2024-01-15T00%3A00%3A00.000Z')
+  })
+
+  test('validateSearch with `encode` that throws should fall back to the unencoded value', async () => {
+    const rootRoute = new BaseRootRoute({})
+    const eventsRoute = new BaseRoute({
+      getParentRoute: () => rootRoute,
+      path: '/events',
+      validateSearch: {
+        types: { input: {} as { n: string }, output: {} as { n: number } },
+        parse: (input: any) => ({ n: Number(input.n) }),
+        encode: (output: { n: number }) => {
+          if (typeof output.n !== 'number') {
+            throw new Error('expected number')
+          }
+          return { n: String(output.n) }
+        },
+      },
+    })
+
+    const routeTree = rootRoute.addChildren([eventsRoute])
+    const router = createTestRouter({
+      routeTree,
+      history: createMemoryHistory({ initialEntries: ['/'] }),
+    })
+    await router.load()
+
+    // Passing an already-encoded value should not crash; encode throws and
+    // we fall back to stringifying the raw value as-is.
+    const location = router.buildLocation({
+      to: '/events',
+      search: { n: 'not-a-number' as any },
+    })
+
+    expect(location.searchStr).toBe('?n=not-a-number')
+  })
+
+  test('validateSearch without `encode` should stringify search params as-is (back-compat)', async () => {
+    const rootRoute = new BaseRootRoute({})
+    const eventsRoute = new BaseRoute({
+      getParentRoute: () => rootRoute,
+      path: '/events',
+      validateSearch: (search: Record<string, unknown>) => ({
+        page: Number(search.page) || 1,
+      }),
+    })
+
+    const routeTree = rootRoute.addChildren([eventsRoute])
+    const router = createTestRouter({
+      routeTree,
+      history: createMemoryHistory({ initialEntries: ['/'] }),
+    })
+    await router.load()
+
+    const location = router.buildLocation({
+      to: '/events',
+      search: { page: 5 },
+    })
+
+    expect(location.search).toEqual({ page: 5 })
+    expect(location.searchStr).toBe('?page=5')
+  })
 })
 
 describe('buildLocation - hash', () => {
